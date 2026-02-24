@@ -37,7 +37,7 @@ export default function RoyaltyRewardPage({ params }: RoyaltyRewardPageProps) {
   }, [loadRewards]);
 
   const handleSearchProducts = async (query: string) => {
-    return await searchProducts(siteId, query);
+    return await searchProducts(query);
   };
 
   const handleClose = () => {

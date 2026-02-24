@@ -57,15 +57,14 @@ export const referenceSchema = z.object({
 
 
 //Porduct
+// In your src/schemas/module.ts — replace the productSchema with this:
+
 export const productSchema = z.object({
-  name: z.string().min(1, "Product name is required"),
-  shortName: z.string().min(1, "Short name is required"),
-  hsnCodeId: z.string().min(1, "HSN Code is required"),
-  categoryId: z.string().min(1, "Category is required"),
-
-  sku: z.nativeEnum(SKUType),
-
-  mrp: z.number().min(0, "MRP must be a non-negative number"),
-  saleRate: z.number().min(0, "Sale rate must be a non-negative number"),
+  name:         z.string().min(1, "Product name is required"),
+  shortName:    z.string().min(1, "Short name is required"),
+  categoryId:   z.string().min(1, "Category is required"),
+  sku:          z.nativeEnum(SKUType),
+  mrp:          z.number().min(0, "MRP must be a non-negative number"),
+  saleRate:     z.number().min(0, "Sale rate must be a non-negative number"),
   purchaseRate: z.number().min(0, "Purchase rate must be a non-negative number"),
 });

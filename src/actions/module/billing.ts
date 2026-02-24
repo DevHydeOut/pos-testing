@@ -40,83 +40,38 @@ export async function generateBillNo(siteId?: string) {
 
 export async function searchProducts(searchTerm: string) {
   const { siteId } = await getCachedSiteContext();
-  
+
   if (!searchTerm.trim()) return [];
-  
+
   const products = await db.product.findMany({
     where: {
       siteId,
-      name: { contains: searchTerm, mode: "insensitive" }
+      OR: [
+        { name:      { contains: searchTerm, mode: "insensitive" } },
+        { shortName: { contains: searchTerm, mode: "insensitive" } },
+      ],
     },
     select: {
-      id: true,
-      name: true,
-      mrp: true,
-      saleRate: true,
+      id:           true,
+      name:         true,
+      mrp:          true,
+      saleRate:     true,
       purchaseRate: true,
       currentStock: true,
-      sku: true,
+      sku:          true,
     },
-    take: 10,
+    orderBy: { name: "asc" },
+    take:    10,
   });
 
-  const productsWithBatches = await Promise.all(
-    products.map(async (product) => {
-      const batches = await db.stockBatch.findMany({
-        where: {
-          siteId,
-          remainingQty: { gt: 0 },
-          movements: {
-            some: {
-              productId: product.id,
-            }
-          }
-        },
-        select: {
-          id: true,
-          remainingQty: true,
-          movements: {
-            where: {
-              productId: product.id,
-              type: "IN"
-            },
-            select: {
-              batchNumber: true,
-              mrp: true,
-              saleRate: true,
-              expiryDate: true,
-            },
-            take: 1,
-            orderBy: {
-              createdAt: 'desc'
-            }
-          }
-        }
-      });
-
-      const transformedBatches = batches
-        .filter(batch => batch.movements.length > 0)
-        .map(batch => ({
-          id: batch.id,
-          batchNumber: batch.movements[0].batchNumber || "N/A",
-          remainingQty: batch.remainingQty,
-          expiryDate: batch.movements[0].expiryDate,
-          mrp: batch.movements[0].mrp || product.mrp,
-          saleRate: batch.movements[0].saleRate || product.saleRate,
-        }));
-
-      return {
-        ...product,
-        batches: transformedBatches,
-        gst: 0,     
-        cgst: 0,       
-        sgst: 0,          
-        hsnCodeValue: undefined,
-      };
-    })
-  );
-
-  return productsWithBatches;
+  // Return products with gst/cgst/sgst as 0 (tax handled by SiteTaxConfig)
+  return products.map((p) => ({
+    ...p,
+    gst:          0,
+    cgst:         0,
+    sgst:         0,
+    hsnCodeValue: undefined,
+  }));
 }
 
 export async function getPatientWithAppointment(patientId: string, date: Date) {

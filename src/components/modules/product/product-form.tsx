@@ -1,10 +1,10 @@
+// File: src/components/modules/product/product-form.tsx
 "use client";
 
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { useEffect } from "react";
 
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -41,149 +41,177 @@ interface Props {
 const SKU_OPTIONS: SKUType[] = ["TUBE", "STRIP", "PIECE", "PACK", "SACHET", "BOTTLE"];
 
 export function ProductForm({ initialData, categories, onClose }: Props) {
-  const form = useForm<FormData>({
+  const {
+    register,
+    handleSubmit,
+    watch,
+    setValue,
+    reset,
+    formState: { errors, isSubmitting },
+  } = useForm<FormData>({
     resolver: zodResolver(productSchema),
     defaultValues: {
-      name: initialData?.name || "",
-      shortName: initialData?.shortName || "",
-      categoryId: initialData?.categoryId || "",
-      sku: initialData?.sku || "PIECE",
-      mrp: initialData?.mrp || undefined,
-      saleRate: initialData?.saleRate || undefined,
-      purchaseRate: initialData?.purchaseRate || undefined,
+      name:         initialData?.name         ?? "",
+      shortName:    initialData?.shortName    ?? "",
+      categoryId:   initialData?.categoryId   ?? "",
+      sku:          initialData?.sku          ?? "PIECE",
+      mrp:          initialData?.mrp          ?? undefined,
+      saleRate:     initialData?.saleRate     ?? undefined,
+      purchaseRate: initialData?.purchaseRate ?? undefined,
     },
   });
-
-  // 🔍 ENHANCED DEBUG
-  useEffect(() => {
-    console.log("=== PRODUCT FORM DETAILED DEBUG ===");
-    console.log("1. Total categories prop:", categories);
-    console.log("2. Categories count:", categories.length);
-    
-    // Group by type
-    const byType = categories.reduce((acc, cat) => {
-      acc[cat.type] = (acc[cat.type] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-    
-    console.log("3. Categories grouped by type:", byType);
-    
-    // Check each category
-    categories.forEach(cat => {
-      console.log(`   - "${cat.name}": type="${cat.type}" (${typeof cat.type})`);
-    });
-    
-    console.log("================================");
-  }, [categories]);
-
-  // Filter categories - since Type enum doesn't have PRODUCT, we'll use all categories
-  // or filter based on what's actually needed. Based on the error, Type only has:
-  // "SERVICE" | "DESIGNATION" | "DISEASE"
-  // So we should either use all categories or add a comment explaining the situation
-  const productCategories = categories; // Use all categories since Type.PRODUCT doesn't exist
 
   const onSubmit = async (data: FormData) => {
     const action = initialData
       ? await updateProduct(initialData.id, data)
       : await createProduct(data);
 
-    if ("error" in action) toast.error("Operation failed");
-    else toast.success(`Product ${initialData ? "updated" : "created"}`);
+    if ("error" in action && action.error) {
+      const err = action.error;
 
-    if (!initialData) form.reset();
+      if (typeof err === "string") {
+        toast.error(err);
+        return;
+      }
+      if (typeof err === "object" && "message" in err) {
+        toast.error((err as { message: string }).message);
+        return;
+      }
+      if (typeof err === "object" && "formErrors" in err) {
+        const flat = err as { formErrors?: string[]; fieldErrors?: Record<string, string[]> };
+        const msg =
+          flat.formErrors?.[0] ??
+          Object.values(flat.fieldErrors ?? {})?.[0]?.[0] ??
+          "Validation failed.";
+        toast.error(msg);
+        return;
+      }
+
+      toast.error("Operation failed. Please try again.");
+      return;
+    }
+
+    toast.success(`Product ${initialData ? "updated" : "created"} successfully.`);
+    if (!initialData) reset();
     onClose();
   };
 
-  // Show warning if no categories available
-  const showWarning = categories.length === 0;
+  const onInvalid = (errs: typeof errors) => {
+    const firstError = Object.values(errs)?.[0]?.message;
+    if (firstError) toast.error(String(firstError));
+  };
 
   return (
-    <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-      {/* 🚨 WARNING BANNER */}
-      {showWarning && (
+    <form onSubmit={handleSubmit(onSubmit, onInvalid)} className="space-y-4">
+
+      {categories.length === 0 && (
         <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3 text-sm">
-          <p className="font-semibold text-yellow-800">⚠️ No Categories Available!</p>
-          <p className="text-yellow-700 mt-1">
-            Please create categories before adding products.
-          </p>
+          <p className="font-semibold text-yellow-800">No Categories Available!</p>
+          <p className="text-yellow-700 mt-1">Please create categories before adding products.</p>
         </div>
       )}
 
+      {/* Basic Info */}
       <div className="space-y-2">
         <h3 className="text-sm font-semibold">Basic Info</h3>
-        <Input placeholder="Product name" {...form.register("name")} />
-        <Input placeholder="Short name" {...form.register("shortName")} />
+        <div>
+          <Input placeholder="Product name" {...register("name")} />
+          {errors.name && <p className="text-xs text-red-500 mt-1">{errors.name.message}</p>}
+        </div>
+        <div>
+          <Input placeholder="Short name" {...register("shortName")} />
+          {errors.shortName && <p className="text-xs text-red-500 mt-1">{errors.shortName.message}</p>}
+        </div>
       </div>
 
+      {/* Classification */}
       <div className="space-y-2">
         <h3 className="text-sm font-semibold">Classification</h3>
 
-        <Select
-          value={form.watch("categoryId")}
-          onValueChange={(val) => form.setValue("categoryId", val)}
-        >
-          <SelectTrigger>
-            <SelectValue placeholder="Select Category" />
-          </SelectTrigger>
-          <SelectContent>
-            {productCategories.length > 0 ? (
-              productCategories.map((cat) => (
-                <SelectItem key={cat.id} value={cat.id}>
-                  {cat.name}
-                </SelectItem>
-              ))
-            ) : (
-              <div className="px-2 py-1.5 text-sm">
-                <p className="text-destructive font-medium">
-                  No categories available
-                </p>
-                <p className="text-muted-foreground text-xs mt-2">
-                  Please create categories first
-                </p>
-              </div>
-            )}
-          </SelectContent>
-        </Select>
+        <div>
+          <Select value={watch("categoryId")} onValueChange={(val) => setValue("categoryId", val)}>
+            <SelectTrigger>
+              <SelectValue placeholder="Select Category" />
+            </SelectTrigger>
+            <SelectContent>
+              {categories.length > 0 ? (
+                categories.map((cat) => (
+                  <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
+                ))
+              ) : (
+                <div className="px-2 py-1.5 text-sm text-muted-foreground">No categories available</div>
+              )}
+            </SelectContent>
+          </Select>
+          {errors.categoryId && <p className="text-xs text-red-500 mt-1">{errors.categoryId.message}</p>}
+        </div>
 
-        <Select
-          value={form.watch("sku")}
-          onValueChange={(val) => form.setValue("sku", val as SKUType)}
-        >
-          <SelectTrigger>
-            <SelectValue placeholder="Select SKU" />
-          </SelectTrigger>
-          <SelectContent>
-            {SKU_OPTIONS.map((sku) => (
-              <SelectItem key={sku} value={sku}>
-                {sku}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div>
+          <Select value={watch("sku")} onValueChange={(val) => setValue("sku", val as SKUType)}>
+            <SelectTrigger>
+              <SelectValue placeholder="Select SKU" />
+            </SelectTrigger>
+            <SelectContent>
+              {SKU_OPTIONS.map((sku) => (
+                <SelectItem key={sku} value={sku}>{sku}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {errors.sku && <p className="text-xs text-red-500 mt-1">{errors.sku.message}</p>}
+        </div>
       </div>
 
+      {/* Pricing */}
       <div className="space-y-2">
-        <h3 className="text-sm font-semibold">Pricing (₹)</h3>
+        <h3 className="text-sm font-semibold">Pricing ($)</h3>
+        <div className="grid grid-cols-3 gap-3">
 
-        <Input
-          type="number"
-          placeholder="MRP"
-          {...form.register("mrp", { valueAsNumber: true })}
-        />
-        <Input
-          type="number"
-          placeholder="Sale Rate"
-          {...form.register("saleRate", { valueAsNumber: true })}
-        />
-        <Input
-          type="number"
-          placeholder="Purchase Rate"
-          {...form.register("purchaseRate", { valueAsNumber: true })}
-        />
+          {/* MRP */}
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">MRP *</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm select-none">$</span>
+              <Input type="number" step="0.01" min="0" placeholder="0.00"
+                className="pl-7"
+                {...register("mrp", { valueAsNumber: true })} />
+            </div>
+            {errors.mrp && <p className="text-xs text-red-500">{errors.mrp.message}</p>}
+          </div>
+
+          {/* Sale Rate */}
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">Sale Rate *</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm select-none">$</span>
+              <Input type="number" step="0.01" min="0" placeholder="0.00"
+                className="pl-7"
+                {...register("saleRate", { valueAsNumber: true })} />
+            </div>
+            {errors.saleRate && <p className="text-xs text-red-500">{errors.saleRate.message}</p>}
+          </div>
+
+          {/* Purchase Rate */}
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">Purchase Rate *</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm select-none">$</span>
+              <Input type="number" step="0.01" min="0" placeholder="0.00"
+                className="pl-7"
+                {...register("purchaseRate", { valueAsNumber: true })} />
+            </div>
+            {errors.purchaseRate && <p className="text-xs text-red-500">{errors.purchaseRate.message}</p>}
+          </div>
+
+        </div>
       </div>
 
       <DialogFooter>
-        <Button type="submit">{initialData ? "Update" : "Save"}</Button>
+        <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+        <Button type="submit" disabled={isSubmitting}>
+          {isSubmitting
+            ? initialData ? "Updating..." : "Saving..."
+            : initialData ? "Update" : "Save"}
+        </Button>
       </DialogFooter>
     </form>
   );

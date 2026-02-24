@@ -411,10 +411,10 @@ export default function POSBillingForm({ siteId }: Props) {
       toast.success(`Bill ${result.billNo} created successfully!`);
 
       setBillToPrint({
-        billNo:       result.billNo!,
-        billType:     "WALKIN",
-        createdAt:    new Date(),
-        customerName: customerName || "Customer",
+        billNo:        result.billNo!,
+        billType:      "WALKIN",
+        createdAt:     new Date(),
+        customerName:  customerName || "Customer",
         customerPhone,
         items: products.map((p) => ({
           productName: p.productName,
@@ -426,7 +426,7 @@ export default function POSBillingForm({ siteId }: Props) {
           taxPercent:  p.taxPercent,
           totalAmount: p.totalAmount,
         })),
-        grossAmount,
+        grossAmount:   grossAmount,
         discount:      itemDiscounts + billDiscount + royaltyDiscount,
         totalTax:      totalTaxAmount,
         netAmount,
@@ -435,6 +435,12 @@ export default function POSBillingForm({ siteId }: Props) {
         paymentStatus: dueAmount <= 0 ? "PAID" : paidAmount > 0 ? "PARTIAL" : "UNPAID",
         payments:      [{ method: paymentMethod, amount: paidAmount }],
         remark,
+
+        // ── Royalty fields ────────────────────────────────────────────────────────
+        royaltyPointsEarned:   pointsToEarn,
+        royaltyPointsBalance:  royaltyAccount?.currentPoints ?? 0,
+        royaltyRewardClaimed:  claimedReward?.name,
+        royaltyRewardDiscount: royaltyDiscount > 0 ? royaltyDiscount : undefined,
       });
       setShowPrint(true);
       handleReset();

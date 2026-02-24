@@ -148,9 +148,7 @@ export async function deleteProduct(id: string) {
   if (!product)
     return { error: { message: "Product not found or access denied" } };
 
-  await db.product.delete({
-    where: { id, siteId: userData.siteId },
-  });
+  await db.product.delete({ where: { id, siteId: userData.siteId } });
 
   await createAuditLog({
     siteId:     userData.siteId,
@@ -178,16 +176,14 @@ export async function getAllProducts() {
   return await db.product.findMany({
     where: { siteId },
     orderBy: { createdAt: "desc" },
-    include: {
-      category: true,
-    },
+    include: { category: true },
   });
 }
 
 // ============================================
 // SEARCH PRODUCTS (used by billing form)
 // ============================================
-export async function searchProducts(query: string, query: string) {
+export async function searchProducts(query: string) {
   const { siteId } = await getCachedSiteContext();
 
   if (!query || query.trim().length < 2) return [];
@@ -200,9 +196,7 @@ export async function searchProducts(query: string, query: string) {
         { shortName: { contains: query, mode: "insensitive" } },
       ],
     },
-    include: {
-      category: true,
-    },
+    include: { category: true },
     orderBy: { name: "asc" },
     take: 20,
   });
