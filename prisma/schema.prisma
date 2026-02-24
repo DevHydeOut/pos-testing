@@ -1,0 +1,944 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ============================================
+// AUTHENTICATION & USER MANAGEMENT
+// ============================================
+
+  model MainUser {
+    id            String   @id @default(cuid())
+    email         String   @unique
+    name          String?
+    image         String?
+    googleId      String?  @unique
+    
+    companyCode   String   @unique @default(cuid())  // ✅ ADD THIS LINE
+    
+    sites         MainSite[]
+    subUsers      SubUser[]
+    
+    createdAt     DateTime @default(now())
+    updatedAt     DateTime @updatedAt
+    
+    @@index([companyCode])  // ✅ ADD THIS LINE
+  }
+
+  model MainSite {
+    id          String   @id @default(cuid())
+    name        String
+    siteId      String   @unique @default(uuid())  // ⬅️ ADD @default(uuid())
+    
+    mainUserId  String
+    mainUser    MainUser @relation(fields: [mainUserId], references: [id], onDelete: Cascade)
+    
+    // ✅ Site permissions for sub-users (many-to-many relationship)
+    sitePermissions SitePermission[]
+    
+    // ... rest of your relations stay the same
+    categories    Category[]
+    services      Service[]
+    employees     Employee[]
+    hsnCodes      HsnCode[]
+    references    Reference[]
+    products      Product[]
+    stockBatches  StockBatch[]
+    stockMovements StockMovement[]
+    patients      Patient[]
+    appointments  Appointment[]
+    sales         Sale[]
+    auditLogs     AuditLog[]
+    royaltyRewards  RoyaltyReward[]
+    royaltyConfig      RoyaltyConfig?
+    royaltyAccounts    RoyaltyAccount[]
+    siteTaxConfig      SiteTaxConfig?
+    
+    createdAt   DateTime @default(now())
+    updatedAt   DateTime @updatedAt
+  }
+
+  // ✅ NEW: Sub-users are now centralized under MainUser
+
+  model SubUser {
+    id          String   @id @default(cuid())
+    username    String
+    email       String? 
+    password    String
+    name        String?
+    
+    mainUserId  String
+    mainUser    MainUser @relation(fields: [mainUserId], references: [id], onDelete: Cascade)
+    
+    sitePermissions SitePermission[]
+    auditLogs   AuditLog[]
+    
+    createdAt   DateTime @default(now())
+    updatedAt   DateTime @updatedAt
+    
+    @@unique([mainUserId, username])  // ✅ Username unique per company
+    @@index([mainUserId])
+    @@index([username])
+  }
+
+
+  // ✅ NEW: Junction table for sub-user permissions per site
+  model SitePermission {
+    id          String   @id @default(cuid())
+    
+    subUserId   String
+    subUser     SubUser  @relation(fields: [subUserId], references: [id], onDelete: Cascade)
+    
+    siteId      String
+    site        MainSite @relation(fields: [siteId], references: [id], onDelete: Cascade)
+    
+    role        SubUserRole @default(VIEWER)
+
+    pagePermissions   Json
+    
+    // URL-based permissions within this site
+    allowedUrls     String[]
+    restrictedUrls  String[]
+    
+    // Custom permissions for this site
+    canViewAnalytics    Boolean @default(false)
+    canManageInventory  Boolean @default(false)
+    canManageSales      Boolean @default(false)
+    canManagePatients   Boolean @default(false)
+    canManageEmployees  Boolean @default(false)
+    
+    createdAt   DateTime @default(now())
+    updatedAt   DateTime @updatedAt
+    
+    @@unique([subUserId, siteId]) // One permission record per user per site
+    @@index([subUserId])
+    @@index([siteId])
+  }
+
+enum SubUserRole {
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+// ============================================
+// AUDIT LOG - Track all changes
+// ============================================
+
+model AuditLog {
+  id            String   @id @default(cuid())
+  
+  siteId        String
+  site          MainSite @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  
+  // User who made the change
+  userId        String?  // SubUser ID
+  subUser       SubUser? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userName      String   // Store name for history even if user deleted
+  userRole      String   // Store role at time of action
+  
+  // Action details
+  action        AuditAction // CREATE, UPDATE, DELETE, LOGIN, LOGOUT
+  entityType    String      // "Product", "Sale", "Appointment", etc.
+  entityId      String?     // ID of affected record
+  entityName    String?     // Name/description for display
+  
+  // Change tracking
+  oldValues     Json?       // Previous state
+  newValues     Json?       // New state
+  changes       String?     // Human-readable summary
+  
+  // Metadata
+  ipAddress     String?
+  userAgent     String?
+  
+  createdAt     DateTime @default(now())
+  
+  @@index([siteId, createdAt])
+  @@index([siteId, userId])
+  @@index([siteId, entityType, entityId])
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  EXPORT
+  IMPORT
+}
+
+// ============================================
+// OLD USER SYSTEM (Keep for backward compatibility)
+// ============================================
+
+enum UserRole {
+  ADMIN
+  USER
+  SUPER_ADMIN
+}
+
+model User {
+  id                String            @id @default(cuid())
+  name              String?
+  username          String?           @unique
+  image             String?
+  password          String?
+  role              UserRole          @default(USER)
+  accounts          Account[]
+
+  employeeId  String?  @unique
+  employee    Employee? @relation(fields: [employeeId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Account {
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+ 
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+ 
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+ 
+  @@id([provider, providerAccountId])
+}
+
+// ============================================
+// CATEGORY - Site Specific
+// ============================================
+
+enum Type {
+  PRODUCT
+  SERVICE
+  DESIGNATION
+  DISEASE
+}
+
+model Category {
+  id         String   @id @default(cuid())
+  type       Type 
+  name       String
+  shortName  String
+  
+  siteId     String
+  site       MainSite @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  
+  createdBy  String?
+  createdAt  DateTime @default(now())
+  
+  services   Service[]
+  employees  Employee[]
+  products   Product[]
+  
+  @@unique([siteId, name, type])
+  @@unique([siteId, shortName, type])
+  @@index([siteId])
+  @@index([type])
+  @@index([siteId, type])
+}
+
+// ============================================
+// SERVICES - Site Specific
+// ============================================
+
+model Service {
+  id          String   @id @default(cuid())
+  name        String
+  shortName   String
+  description String?
+  
+  categoryId  String
+  category    Category @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  
+  siteId      String
+  site        MainSite @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  
+  createdBy   String?
+  createdAt   DateTime @default(now())
+
+  appointments Appointment[]
+  
+  @@unique([siteId, name])
+  @@unique([siteId, shortName])
+  @@index([siteId])
+  @@index([categoryId])
+  @@index([siteId, categoryId])
+}
+
+// ============================================
+// EMPLOYEE - Site Specific
+// ============================================
+
+model Employee {
+  id              String              @id @default(cuid())
+  name            String
+  
+  categoryId      String
+  category        Category            @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  
+  siteId          String
+  site            MainSite            @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  
+  consultationFee Int                 @default(0)
+  
+  user            User?
+  
+  defaultSlotDuration Int             @default(30)
+  bufferTime      Int                 @default(5)
+  
+  schedules       EmployeeSchedule[]
+  timeSlots       EmployeeTimeSlot[]
+  overrides       EmployeeOverride[]
+  appointments    Appointment[]
+  sales           Sale[]
+  
+  createdBy       String?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  
+  @@index([siteId])
+  @@index([categoryId])
+  @@index([siteId, categoryId])
+}
+
+model EmployeeSchedule {
+  id         String   @id @default(cuid())
+  employeeId String
+  dayOfWeek  Int
+  startTime  String
+  endTime    String
+  isWorking  Boolean  @default(true)
+
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, dayOfWeek])
+}
+
+model EmployeeTimeSlot {
+  id          String     @id @default(cuid())
+  employeeId  String
+  date        DateTime
+  startTime   String
+  endTime     String
+  duration    Int        @default(30)
+  status      SlotStatus @default(AVAILABLE)
+  reason      String?
+  
+  employee    Employee   @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  
+  @@unique([employeeId, date, startTime])
+  @@index([employeeId, date, status])
+  @@index([date, status])
+}
+
+enum SlotStatus {
+  AVAILABLE   
+  BOOKED      
+  BLOCKED     
+}
+
+model EmployeeOverride {
+  id         String   @id @default(cuid())
+  employeeId String
+  date       DateTime
+  startTime  String
+  endTime    String
+  reason     String?
+
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, date, startTime, endTime])
+  @@index([employeeId, date])
+}
+
+// ============================================
+// HSN CODE - Site Specific
+// ============================================
+
+model HsnCode {
+  id          String   @id @default(cuid())
+  name        String
+  hsnCode     String
+  gst         Float
+  cgst        Float
+  sgst        Float
+  
+  siteId      String
+  site        MainSite @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  
+  createdBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([siteId])
+  @@index([siteId, hsnCode])
+}
+
+// ============================================
+// REFERENCE - Site Specific
+// ============================================
+
+model Reference {
+  id         String   @id @default(cuid())
+  name       String
+  shortName  String
+  
+  siteId     String
+  site       MainSite @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  
+  createdBy  String?
+  createdAt  DateTime @default(now())
+
+  appointments Appointment[]
+
+  @@unique([siteId, name])
+  @@unique([siteId, shortName])
+  @@index([siteId])
+}
+
+// ============================================
+// PRODUCT - Site Specific
+// ============================================
+
+enum SKUType {
+  TUBE
+  STRIP
+  PIECE
+  PACK
+  SACHET
+  BOTTLE
+}
+
+model Product {
+  id             String   @id @default(cuid())
+  name           String
+  shortName      String
+  
+  categoryId     String
+  category       Category  @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  
+  siteId         String
+  site           MainSite  @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  sku            SKUType  @default(PIECE)
+  mrp            Float
+  saleRate       Float
+  purchaseRate   Float
+
+  currentStock   Int     @default(0)
+
+  stockMovement  StockMovement[]
+  saleItems      SaleItem[]
+  royaltyRewards  RoyaltyReward[] 
+
+  createdBy      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  
+  @@unique([siteId, name])
+  @@unique([siteId, shortName])
+  @@index([siteId])
+  @@index([categoryId])
+  @@index([siteId, categoryId])
+}
+
+// ============================================
+// STOCK MANAGEMENT - Site Specific
+// ============================================
+
+enum MovementType {
+  IN
+  OUT
+  ADJUSTMENT
+  SALE      
+  RETURN    
+  TRANSFER  
+}
+
+enum Location {
+  WAREHOUSE
+  STORE
+  ONLINE
+  PHARMACY   
+}
+
+model StockBatch {
+  id           String           @id @default(uuid())
+  
+  siteId       String
+  site         MainSite         @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  
+  remainingQty Int              @default(0)
+  
+  createdBy    String?
+  createdAt    DateTime         @default(now())
+
+  movements    StockMovement[]
+  saleItems    SaleItem[]
+  
+  @@index([siteId])
+}
+
+model StockMovement {
+  id             String       @id @default(uuid())
+  
+  productId      String
+  product        Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  batchId        String?
+  batch          StockBatch?  @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  
+  siteId         String
+  site           MainSite     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  remark         String?
+  type           MovementType
+  quantity       Int
+  location       Location
+  batchNumber    String? 
+
+  mrp            Float?
+  saleRate       Float?
+  purchaseRate   Float?
+  expiryDate     DateTime?
+
+  sourceType     String?
+  sourceId       String?
+
+  createdBy      String?
+  createdAt      DateTime      @default(now())
+
+  @@index([siteId])
+  @@index([productId])
+  @@index([batchNumber])
+  @@index([createdAt])
+}
+
+// ============================================
+// PATIENT - Site Specific
+// ============================================
+
+enum InitialType {
+  MR
+  MRS
+}
+
+enum Gender {
+  Male 
+  Female
+  Others
+}
+
+model Patient {
+  id              String   @id @default(uuid())
+  uhid            String   // Unique within site
+  
+  siteId          String
+  site            MainSite @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  
+  initials        InitialType?
+  name            String
+  guardianInitials InitialType? 
+  guardianName    String?
+  
+  gender          Gender
+  phone           String   @db.VarChar(15) 
+  email           String?
+  
+  country         String? 
+  state           String? 
+  city            String? 
+  zipcode         String?
+  address         String?
+
+  sales           Sale[]   
+  appointments    Appointment[]
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@unique([siteId, uhid])
+  @@index([siteId])
+  @@index([siteId, phone])
+}
+
+// ============================================
+// APPOINTMENT - Site Specific
+// ============================================
+
+enum AppointmentType {
+  CONSULTATION
+  FOLLOW_UP
+  OPD
+}
+
+model Appointment {
+  id              String   @id @default(uuid())
+  billNo          String
+  appointmentType AppointmentType
+  
+  siteId          String
+  site            MainSite @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  patientId       String?
+  patient         Patient?   @relation(fields: [patientId], references: [id])
+
+  age             Int?
+  weight          Float?
+
+  serviceId       String?
+  service         Service?   @relation(fields: [serviceId], references: [id])
+
+  referenceId     String?
+  reference       Reference? @relation(fields: [referenceId], references: [id])
+
+  consultantId    String
+  consultant      Employee @relation(fields: [consultantId], references: [id], onDelete: Restrict)
+  consultationFee Float
+
+  remark          String?
+
+  grossAmount     Float
+  discount        Float
+  netAmount       Float
+
+  transactionId   String?
+  paidAmount      Float     @default(0)
+  dueAmount       Float     @default(0)
+  paymentStatus   String    @default("PENDING")
+  paymentMethod   String?
+
+  slot            DateTime
+
+  sales           Sale[]   
+
+  createdBy       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([siteId, billNo])
+  @@unique([consultantId, slot])
+  @@index([siteId])
+}
+
+// ============================================
+// SALES - Site Specific
+// ============================================
+
+enum BillType {
+  CONSULTATION
+  WALKIN
+  RETURN
+  COURIER
+}
+
+enum PaymentStatus {
+  PAID
+  UNPAID
+  PARTIAL
+  REFUNDED
+}
+
+model Sale {
+  id             String        @id @default(uuid())
+  billNo         String
+  billType       BillType
+  
+  siteId         String
+  site           MainSite      @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  
+  patientId      String?
+  patient        Patient?      @relation(fields: [patientId], references: [id], onDelete: SetNull)
+  
+  customerName   String?
+  customerPhone  String?
+  customerAddress String?
+  
+  appointmentId  String?       @unique
+  appointment    Appointment?  @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  
+  consultantId   String?
+  consultant     Employee?     @relation(fields: [consultantId], references: [id], onDelete: SetNull)
+  
+  remark         String?
+  grossAmount    Float         @default(0)
+  discount       Float         @default(0)
+  netAmount      Float         @default(0)
+  paidAmount     Float         @default(0)
+  dueAmount      Float         @default(0)
+  paymentStatus  PaymentStatus @default(UNPAID)
+  
+  items          SaleItem[]
+  
+  returnForBillNo String?
+  returnReason    String?
+  
+  courier        Courier?
+
+  createdBy      String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  isEdited       Boolean       @default(false)
+  editedAt       DateTime?
+  editedBy       String?       // SubUser ID who edited
+  editReason     String?       @db.Text
+  
+  @@unique([siteId, billNo])
+  @@index([siteId])
+  @@index([siteId, billNo])
+  @@index([patientId])
+  @@index([billType])
+  @@index([createdAt])
+}
+
+enum CourierStatus {
+  PENDING
+  DISPATCHED
+  DELIVERED
+  RETURNED
+}
+
+model Courier {
+  id                Int           @id @default(autoincrement())
+  
+  saleId            String        @unique
+  sale              Sale          @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  
+  status            CourierStatus @default(PENDING)
+  statusUpdatedAt   DateTime      @default(now())
+  remarks           String?
+  
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  
+  @@index([status])
+  @@index([statusUpdatedAt])
+}
+
+model SaleItem {
+  id             String       @id @default(uuid())
+  saleId         String
+  sale           Sale         @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  
+  productId      String
+  product        Product      @relation(fields: [productId], references: [id], onDelete: Restrict)
+  
+  batchId        String?
+  batch          StockBatch?  @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  
+  productName    String
+  batchNumber    String?
+  quantity       Int
+  mrp            Float
+  saleRate       Float
+  discount       Float        @default(0)
+  taxPercent     Float        @default(0)
+  taxAmount      Float        @default(0)
+  totalAmount    Float
+  
+  expiryDate     DateTime?
+  
+  createdAt      DateTime     @default(now())
+  
+  @@index([saleId])
+  @@index([productId])
+}
+
+// ============================================
+// ROYALTY PROGRAM - Site Specific
+// ============================================
+
+enum RewardType {
+  DISCOUNT
+  PRODUCT
+}
+
+enum RewardStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model RoyaltyReward {
+  id              String       @id @default(cuid())
+  name            String       // Reward display name
+
+  siteId          String
+  site            MainSite     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  rewardType      RewardType
+
+  pointsRequired  Int          // Points needed to avail this reward
+
+  // ── DISCOUNT fields (only used when rewardType = DISCOUNT) ──
+  couponName      String?      // e.g. "SUMMER10"
+  discountPercent Float?       // e.g. 10 (means 10%)
+  discountMaxCap  Float?       // e.g. 5 (max $5 discount, null = no cap)
+
+  // ── PRODUCT fields (only used when rewardType = PRODUCT) ──
+  productId       String?
+  product         Product?     @relation(fields: [productId], references: [id], onDelete: SetNull)
+  productQty      Int?         @default(1)
+  redemptions        RoyaltyRedemption[]
+
+  status          RewardStatus @default(ACTIVE)
+
+  createdBy       String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@unique([siteId, name])
+  @@index([siteId])
+  @@index([siteId, status])
+  @@index([siteId, rewardType])
+}
+
+
+
+
+// ============================================
+// ROYALTY ACCOUNTS & TRANSACTIONS
+// ============================================
+
+model RoyaltyConfig {
+  id                  String   @id @default(cuid())
+  siteId              String   @unique
+  site                MainSite @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  isEnabled           Boolean  @default(true)
+  pointsPerAmount     Float    @default(1)    // 1 point per ₹1 spent — change here
+  amountPerPoint      Float    @default(1)
+  minBillForPoints    Float    @default(0)
+  pointExpiryDays     Int?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+model RoyaltyAccount {
+  id                  String   @id @default(cuid())
+  siteId              String
+  site                MainSite @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  phone               String   @db.VarChar(15)
+  customerName        String
+  totalPointsEarned   Int      @default(0)
+  totalPointsRedeemed Int      @default(0)
+  currentPoints       Int      @default(0)
+  pointTransactions   RoyaltyPointTransaction[]
+  redemptions         RoyaltyRedemption[]
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@unique([siteId, phone])
+  @@index([siteId])
+  @@index([siteId, phone])
+}
+
+model RoyaltyPointTransaction {
+  id           String         @id @default(cuid())
+  accountId    String
+  account      RoyaltyAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  siteId       String
+  points       Int
+  type         PointTxnType
+  saleId       String?
+  saleBillNo   String?
+  billAmount   Float?
+  redemptionId String?
+  expiresAt    DateTime?
+  note         String?
+  createdBy    String?
+  createdAt    DateTime       @default(now())
+
+  @@index([accountId])
+  @@index([siteId])
+}
+
+enum PointTxnType {
+  EARNED
+  REDEEMED
+  EXPIRED
+  MANUAL_ADD
+  MANUAL_DEDUCT
+  REVERSED
+}
+
+model RoyaltyRedemption {
+  id              String         @id @default(cuid())
+  accountId       String
+  account         RoyaltyAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  rewardId        String
+  reward          RoyaltyReward  @relation(fields: [rewardId], references: [id], onDelete: Restrict)
+  siteId          String
+  pointsUsed      Int
+  couponCode      String?
+  discountApplied Float?
+  saleId          String?
+  saleBillNo      String?
+  status          RedemptionStatus @default(PENDING)
+  expiresAt       DateTime?
+  usedAt          DateTime?
+  createdBy       String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([accountId])
+  @@index([siteId])
+}
+
+enum RedemptionStatus {
+  PENDING
+  APPLIED
+  EXPIRED
+  CANCELLED
+}
+
+
+model SiteTaxConfig {
+  id             String   @id @default(cuid())
+
+  // Link to your site — one config per site
+  siteId         String   @unique
+  site           MainSite @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  // Which Canadian province this store operates in
+  provinceCode   String   @default("ON")   // 2-letter code: ON, BC, QC, AB, etc.
+  provinceName   String   @default("Ontario")
+
+  // Stored rates (mirrors canada-tax.ts but DB-editable)
+  // Allows future override without a code deploy
+  gstRate        Float    @default(0)      // 0 if HST province
+  hstRate        Float    @default(13)     // 13 for Ontario, 15 for Atlantic, etc.
+  pstRate        Float    @default(0)
+  qstRate        Float    @default(0)
+  totalRate      Float    @default(13)     // Convenience: sum of all applicable rates
+
+  // Tax registration numbers (shown on receipts — legally required in Canada)
+  gstNumber      String?                   // Federal GST/HST registration #
+  pstNumber      String?                   // Provincial PST # (BC/SK/MB)
+  qstNumber      String?                   // QST # (Quebec only)
+
+  // Whether tax is enabled at all (some items may be tax-exempt)
+  isEnabled      Boolean  @default(true)
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([siteId])
+}
